@@ -31,6 +31,6 @@ struct Chip8 {
 void chip8_initialize(struct Chip8* chip8);
 int  chip8_load_rom(struct Chip8* chip8, char* filename);
 void chip8_cycle(struct Chip8* chip8);
-/* TODO: add setters for colors and keys */
+/* TODO: add setters for colors and keys?*/
 
 #endif

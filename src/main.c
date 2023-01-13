@@ -1,16 +1,26 @@
 #include <stdio.h>
 #include <stdbool.h>
 #include <argp.h>
+#include <getopt.h>
 #include <SDL2/SDL.h>
 #include <unistd.h>
 
 #include "chip8.h"
 
-/* ARGP STUFF */
-const char* argp_program_version = "ch8 0.1";
-const char* argp_program_bug_address = "<lambdcalcullus@gmail.com>";
+/* CLI PARSING STUFF */
+void fprint_usage(FILE* stream, int exit_code)
+{
+    fprintf(stream, "Usage: ch8 [OPTIONS...] [ROM]\n");
+    fprintf(stream, 
+            "   -h  --help                 Display this usage message.\n"
+            "   -d  --delay     MILLIS     Delay between clock cycles in milliseconds.\n"
+            "   -s  --scale     FACTOR     Integer scale factor for video.\n"
+            "   -C  --on-color  0xRRGGBBAA Color of ON pixels.\n"
+            "   -c  --off-color 0xRRGGBBAA Color of OFF pixels.\n");
+    exit(exit_code);
+}
 
-struct arguments
+struct config
 {
     char*    rom;
     int      delay_ms;
@@ -19,81 +29,70 @@ struct arguments
     uint32_t color_off;
 };
 
-struct argp_option options[] = {
-    {"delay", 'd', "MILLIS", OPTION_ARG_OPTIONAL,
-     "Delay for each cycle in milliseconds"},
-    {"scale", 's', "SCALE", OPTION_ARG_OPTIONAL,
-     "Integer scale factor for display"},
-    {"color-on", 'C', "COLOR", OPTION_ARG_OPTIONAL,
-    "Hex code for the color of on pixels (RGBA)"},
-    {"color-off", 'c', "COLOR", OPTION_ARG_OPTIONAL,
-    "Hex code for the color of off pixels (RGBA)"},
-    {0}
-};
-
-static error_t
-parse_opt(int key, char* arg, struct argp_state* state)
+void args_parse(struct config* config, int argc, char** argv)
 {
-    struct arguments* arguments = state->input;
-
-    switch (key) {
-        /* TODO: deal with this
+    const struct option long_options[] = {
+        {"help",      no_argument,       NULL, 'h'},
+        {"delay",     required_argument, NULL, 'd'},
+        {"scale",     required_argument, NULL, 's'},
+        {"on-color",  required_argument, NULL, 'C'},
+        {"off-color", required_argument, NULL, 'c'},
+        {NULL, 0, NULL, 0}
+    };
+    const char* short_options = "hd:s:C:c:";
+    
+    int next_option;
+    
+    do {
+        next_option = getopt_long(argc, argv, short_options, long_options, NULL);
+        
+        switch (next_option) {
+        case 'h':
+            fprint_usage(stdout, EXIT_SUCCESS);
+        
         case 'd':
-            arguments->delay_ms = strtol(arg, (char**)NULL, 10);
-            if (arguments->delay_ms == 0) {
-                printf("a");
-                argp_usage(state);
+            config->delay_ms = strtol(optarg, NULL, 10);
+            if (config->delay_ms <= 0) {
+                printf("Invalid value for delay (must be positive integer).\n");
+                fprint_usage(stderr, EXIT_FAILURE);
             }
             break;
         case 's':
-            arguments->scale_factor = strtol(arg, (char**)NULL, 10);
-            if (arguments->scale_factor <= 0) {
-                printf("b");
-                argp_usage(state);
+            config->scale_factor = strtol(optarg, NULL, 10);
+            if (config->scale_factor <= 0) {
+                printf("Invalid value for scale factor (must be positive integer).\n");
+                fprint_usage(stderr, EXIT_FAILURE);
             }
             break;
         case 'C':
-            arguments->color_on = strtol(arg, (char**) NULL, 0);
-            if (arguments->color_on <= 0) {
-                printf("c");
-                argp_usage(state);
+            config->color_on = strtol(optarg, NULL, 16);
+            if (config->color_on <= 0) {
+                printf("Invalid value for ON color (format: 0xRRGGBBAA).\n");
+                fprint_usage(stderr, EXIT_FAILURE);
             }
             break;
-        case 'c': {
-            arguments->color_off = strtol(arg, NULL, 0);
-            if (arguments->color_off <= 0) {
-                printf("d");
-                argp_usage(state);
+        case 'c':
+            config->color_off = strtol(optarg, NULL, 16);
+            if (config->delay_ms <= 0) {
+                printf("Invalid value for OFF color (format: 0xRRGGBBAA).\n");
+                fprint_usage(stderr, EXIT_FAILURE);
             }
             break;
-        } */
-        case ARGP_KEY_ARG:
-            if (state->arg_num >= 1) {
-                printf("Too many arguments.\n");
-                argp_usage(state);
-            }
-            arguments->rom = arg;
-            break;
-        case ARGP_KEY_END:
-            if (state->arg_num < 1) {
-                printf("Not enough arguments.\n");
-                argp_usage(state);
-            }
+        case '?':
+            fprint_usage(stderr, EXIT_FAILURE);
+        case -1:
             break;
         default:
-            return ARGP_ERR_UNKNOWN;
-    }
-
-    return 0;
+            //this is not supposed to happen lol
+            fprintf(stderr, "If you're seeing this, tell me how you got this message.\n");
+            fprint_usage(stderr, EXIT_FAILURE);
+        }
+    } while (next_option != -1);
+    
+    //optind now points to first non-option argument, i.e. the ROM
+    config->rom = argv[optind];
 }
-
-static char args_doc[] = "[ROM]";
-
-static char doc[] = 
-"ch8 -- A CHIP-8 emulator written in C using SDL.";
-
-static struct argp argp = {options, parse_opt, args_doc, doc};
-/* END ARGP STUFF*/
+/* CLI PARSING END */
 
 int keymap[16][2]  = {
     {SDLK_1, 0x1}, {SDLK_2, 0x2}, {SDLK_3, 0x3}, {SDLK_4, 0xC},
@@ -135,17 +134,17 @@ bool handle_input(struct Chip8* chip8)
 }
 
 int main(int argc, char** argv) {
-    struct arguments arguments;
+    struct config config = {
+    .delay_ms     = 2,
+    .scale_factor = 15,
+    .color_on     = 0x0f380fff,
+    .color_off    = 0x9bbc0fff
+    };
 
-    arguments.delay_ms     = 2;
-    arguments.scale_factor = 15;
-    arguments.color_on     = 0x0f380fff;
-    arguments.color_off    = 0x9bbc0fff;
-
-    argp_parse(&argp, argc, argv, 0, 0, &arguments);
+    args_parse(&config, argc, argv);
     
-    const int window_width = CH8_VIDEO_WIDTH * arguments.scale_factor;
-    const int window_height = CH8_VIDEO_HEIGHT * arguments.scale_factor;
+    const int window_width = CH8_VIDEO_WIDTH * config.scale_factor;
+    const int window_height = CH8_VIDEO_HEIGHT * config.scale_factor;
 
     SDL_Init(SDL_INIT_VIDEO);
 
@@ -159,14 +158,16 @@ int main(int argc, char** argv) {
     bool quit = false;
 
     struct Chip8 chip8;
-    chip8.color_on = arguments.color_on;
-    chip8.color_off = arguments.color_off;
+    chip8.color_on = config.color_on;
+    chip8.color_off = config.color_off;
     
     chip8_initialize(&chip8);
-    chip8_load_rom(&chip8, arguments.rom);
+    int ret = chip8_load_rom(&chip8, config.rom);
+    if (ret < 0)
+        exit(EXIT_FAILURE);
 
     while (!quit) { 
-        usleep(1000 * arguments.delay_ms);
+        usleep(1000 * config.delay_ms);
 
         quit = handle_input(&chip8);
         
